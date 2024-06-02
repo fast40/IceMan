@@ -1,39 +1,38 @@
 #ifndef STUDENTWORLD_H_
 #define STUDENTWORLD_H_
 
+#include "Actor.h"
 #include "GameWorld.h"
 #include "GameConstants.h"
 #include <string>
 
-// Students:  Add code to this file, StudentWorld.cpp, Actor.h, and Actor.cpp
-
 class StudentWorld : public GameWorld
 {
 public:
-	StudentWorld(std::string assetDir)
-		: GameWorld(assetDir)
-	{
-	}
+        StudentWorld(std::string assetDir);
+        virtual int init();
+        virtual int move();
+        virtual void cleanUp();
+        virtual ~StudentWorld();
 
-	virtual int init()
-	{
-		return GWSTATUS_CONTINUE_GAME;
-	}
+        bool removeIceAt(int x, int y);
+        bool isDirObstructed(int x, int y, GameObject::Direction dir);
 
-	virtual int move()
-	{
-		// This code is here merely to allow the game to build, run, and terminate after you hit enter a few times.
-		// Notice that the return value GWSTATUS_PLAYER_DIED will cause our framework to end the current level.
-		decLives();
-                setGameStatText("hello from a test");
-		return GWSTATUS_PLAYER_DIED;
-	}
+        void addGameObject(GameObject* gameObject);
 
-	virtual void cleanUp()
-	{
-	}
+        const std::vector<GameObject*> getGameObjects() {
+                return static_cast<const std::vector<GameObject*>>(m_gameObjects);
+        };
 
+        Ice* (*getIce())[VIEW_WIDTH] {
+                return m_ice;
+        }
 private:
+        Ice* m_ice[VIEW_HEIGHT][VIEW_WIDTH];
+        Iceman* m_iceman;
+        std::vector<GameObject*> m_gameObjects;
+
+        bool isDistributedObjectPositionOk(int x, int y);
 };
 
 #endif // STUDENTWORLD_H_
