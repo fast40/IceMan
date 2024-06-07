@@ -3,6 +3,7 @@
 #include "GraphObject.h"
 #include "StudentWorld.h"
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <iterator>
 #include <system_error>
@@ -31,6 +32,10 @@ int Actor::getID() const {
 }
 
 void Actor::move(Direction dir) {
+        if (dir != none) {
+                setDirection(dir);
+        }
+
         int x = getX();
         int y = getY();
 
@@ -72,18 +77,23 @@ Agent::Agent(StudentWorld *studentWorld, int health, int imageID, int startX, in
 
 void Agent::annoy(int amount) {
         m_health -= amount;
+}
 
-        if (m_health <= 0) {
-                kill();
-        }
+int Agent::getHealth() {
+        return m_health;
 }
 
 // ---------- ICEMAN ----------
 
-Iceman::Iceman(StudentWorld *studentWorld) : Agent(studentWorld, 10, IID_PLAYER, 0, 0, right, 1, 0) {}
+Iceman::Iceman(StudentWorld *studentWorld) : Agent(studentWorld, 10, IID_PLAYER, 30, 60, right, 1, 0), m_items({{IID_SONAR, 1}, {IID_GOLD, 0}, {IID_WATER_POOL, 5}, {IID_BARREL, 0}}) {}
 
 void Iceman::doSomething() {
         Actor::doSomething();
+
+        if (getHealth() <= 0) {
+                kill();
+                return;
+        }
 
         if (getStudentWorld()->removeIceAt(getX(), getY())) {
                 getStudentWorld()->playSound(SOUND_DIG);
@@ -107,6 +117,12 @@ void Iceman::doSomething() {
                         break;
                 case KEY_PRESS_UP: case KEY_PRESS_DOWN: case KEY_PRESS_LEFT: case KEY_PRESS_RIGHT:
                         break;
+                case 'z': case 'Z':
+                        useSonar();
+                        return;
+                case 'x':
+                        m_items[IID_BARREL] = 100;
+                        return;
         }
 
         Direction dir = keyToDir(key);
@@ -120,20 +136,24 @@ void Iceman::doSomething() {
         else {
                 move(none);
         }
-
-        int x = getX();
-        int y = getY();
-
-        for (Actor* actor : getStudentWorld()->getActors()) {
-
-        }
 }
 
 void Iceman::dropBribe() {
-        if (m_items[IID_GOLD] > 0) {
-                getStudentWorld()->addActor(new Gold(getStudentWorld(), getX(), getY(), true, 100, false, true));
-                m_items[IID_GOLD]--;
+        if (m_items[IID_GOLD] <= 0) {
+                return;
         }
+
+        getStudentWorld()->addActor(new Gold(getStudentWorld(), getX(), getY(), true, 100, false, true));
+        m_items[IID_GOLD]--;
+}
+
+void Iceman::useSonar() {
+        if (m_items[IID_SONAR] <= 0) {
+                return;
+        }
+
+        getStudentWorld()->revealGameElementsWithinRadiusOfIceman(12);
+        m_items[IID_SONAR]--;
 }
 
 void Iceman::giveItem(int itemID, int points) {
@@ -144,7 +164,12 @@ void Iceman::giveItem(int itemID, int points) {
                 getStudentWorld()->playSound(SOUND_GOT_GOODIE);
         }
 
-        m_items[itemID]++;
+        if (itemID == IID_WATER_POOL) {
+                m_items[itemID] += 5;
+        }
+        else {
+                m_items[itemID]++;
+        }
 
         getStudentWorld()->increaseScore(points);
 };
@@ -284,7 +309,6 @@ void Boulder::doSomething() {
                                 moveTo(getX(), getY() - 1);
                         }
                         else {
-                                setVisible(false);
                                 kill();
                         }
                 }
@@ -295,23 +319,24 @@ void Boulder::doSomething() {
 
 // ---------- PROTESTER ----------
 
+Protester::Protester(StudentWorld *studentWorld, int x, int y, int health, int imageID) : Agent(studentWorld, health, imageID, x, y, left, 1, 0), m_numSquaresToMoveInCurrentDirection(0), m_state(moving), m_numTicksToWait(std::max(0, static_cast<int>(3 - getStudentWorld()->getLevel() / 4))) {}
+
 void Protester::doSomething() {
-        if (!isVisible()) {
-                return;
-        }
-        else if (m_health <= 0) {
-                setVisible(false);
-                m_state = dead;
+        Actor::doSomething();
+
+        if (getHealth() <= 0) {
+                m_state = leaving;
         }
 
         switch (m_state) {
         case moving:
-                move(getDirection());
+                // move(getDirection());
 
                 if (m_numSquaresMovedInCurrentDirection >= m_numSquaresToMoveInCurrentDirection) {
-                        m_numTicksToWait = std::max(0, static_cast<int>(3 - getStudentWorld()->getLevel() / 4));
-                        m_state = waiting;
+                        
                 }
+
+                m_state = waiting;
 
                 break;
         case waiting:
@@ -323,17 +348,31 @@ void Protester::doSomething() {
 
                 break;
         case leaving:
+                move(getStudentWorld()->getDirectionToExit(getX(), getY()));
+
+                if(getX() == VIEW_WIDTH - SPRITE_WIDTH && getY() == VIEW_HEIGHT - SPRITE_WIDTH) {
+                        kill();
+                }
+
                 break;
-        case dead:
-                return;
         }
 }
 
 void Protester::bribe() {
-        std::cout << "protester bribed" << std::endl;
+        m_state = leaving;
 }
 
+// ---------- REGULAR PROTESTER ----------
+
+RegularProtester::RegularProtester(StudentWorld *studentWorld, int x, int y) : Protester(studentWorld, x, y, 5, IID_PROTESTER) {}
+
+// ---------- HARDCORE PROTESTER ----------
+
+HardcoreProtester::HardcoreProtester(StudentWorld *studentWorld, int x, int y) : Protester(studentWorld, x, y, 20, IID_HARD_CORE_PROTESTER) {}
+
 // ---------- SQUIRT ----------
+
+Squirt::Squirt(StudentWorld *studentWorld, int x, int y, Direction dir) : Actor(studentWorld, IID_WATER_SPURT, x, y, dir, 1, 1), m_distanceTraveled(0) {}
 
 void Squirt::doSomething() {
         if (!isAlive()) {
@@ -341,6 +380,13 @@ void Squirt::doSomething() {
         }
         else if (!getStudentWorld()->isDirObstructed(getX(), getY(), getDirection()) && m_distanceTraveled < 4) {
                 move(getDirection());
+
+                for (Actor* actor : getStudentWorld()->getActors()) {
+                        if ((actor->getID() == IID_PROTESTER || actor->getID() == IID_HARD_CORE_PROTESTER) && StudentWorld::distance(getX(), getY(), actor->getX(), actor->getY()) <= 3) {
+                                actor->annoy(2);
+                                kill();
+                        }
+                }
 
                 m_distanceTraveled++;
         }
@@ -387,7 +433,7 @@ void Item::doSomething() {
 
         if (m_canBePickedUpByProtesters) {
                 for (Actor* actor : getStudentWorld()->getActors()) {
-                        if (actor->getID() != IID_PROTESTER) {
+                        if (actor->getID() != IID_PROTESTER && actor->getID() != IID_HARD_CORE_PROTESTER) {
                                 continue;
                         }
 
@@ -414,11 +460,11 @@ Gold::Gold(StudentWorld *studentWorld, int x, int y, bool visible, int timeLeft,
 
 // ---------- BARREL ----------
 
-Barrel::Barrel(StudentWorld *studentWorld, int x, int y) : Item(studentWorld, IID_BARREL, 1000, x, y, true, -1, true, false) {}
+Barrel::Barrel(StudentWorld *studentWorld, int x, int y) : Item(studentWorld, IID_BARREL, 1000, x, y, false, -1, true, false) {}
 
 // ---------- WATER ----------
 
-Water::Water(StudentWorld *studentWorld, int x, int y) : Item(studentWorld, IID_WATER_POOL, 100, x, y, true, -1, true, false) {}
+Water::Water(StudentWorld *studentWorld, int x, int y, int timeLeft) : Item(studentWorld, IID_WATER_POOL, 100, x, y, true, timeLeft, true, false) {}
 
 // ---------- SONAR ----------
 

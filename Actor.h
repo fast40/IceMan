@@ -20,10 +20,10 @@ public:
         StudentWorld* getStudentWorld() const;
         int getID() const;
         void move(Direction dir);
-        void annoy(int amount = 1); 
+        virtual void annoy(int amount = 1); 
         void kill();
         bool isAlive();
-        void bribe();
+        virtual void bribe();
 private:
         StudentWorld *m_studentWorld;
         bool m_isAlive;
@@ -35,9 +35,7 @@ class Agent : public Actor {
 public:
         Agent(StudentWorld *studentWorld, int health, int imageID, int startX, int startY, Direction dir = right, double size = 1.0, unsigned int depth = 0);
         void annoy(int amount = 1); 
-        int getHealth() {
-                return m_health;
-        }
+        int getHealth();
 private:
         int m_health = 5;
 };
@@ -48,14 +46,13 @@ public:
         Iceman(StudentWorld *studentWorld);
         void doSomething();
         void giveItem(int itemID, int points);
-        int getLives() const { return m_lives; }
         int getItemCount(int itemID);  // this should be const (ugly)
         void dropBribe();
+        void useSonar();
 private:
         bool canMoveInDir(Direction dir) const;
         Direction keyToDir(int key);
         void fireSquirt();
-        int m_lives = 3;
         std::unordered_map<int, int> m_items;
 };
 
@@ -79,7 +76,7 @@ private:
 
 class Squirt : public Actor {
 public:
-        Squirt(StudentWorld *studentWorld, int x, int y, Direction dir) : Actor(studentWorld, IID_WATER_SPURT, x, y, dir, 1, 2), m_distanceTraveled(0) {}
+        Squirt(StudentWorld *studentWorld, int x, int y, Direction dir);
         void doSomething();
 private:
         int m_distanceTraveled;
@@ -119,42 +116,31 @@ public:
 
 class Water : public Item {
 public:
-        Water(StudentWorld *studentWorld, int x, int y);
+        Water(StudentWorld *studentWorld, int x, int y, int timeLeft);
 };
 
-// class Protester : public Actor {
-// public:
-//         Protester(StudentWorld *studentWorld, int x, int y, int imageID) : Actor(studentWorld, imageID, x, y, left, 1, 0) {}
-// };
-
-class Protester : public Actor {
+class Protester : public Agent {
 public:
-        Protester(StudentWorld *studentWorld, int x, int y, int imageID) : Actor(studentWorld, imageID, x, y, left, 1, 0), m_numSquaresToMoveInCurrentDirection(0), m_health(5) {}
+        Protester(StudentWorld *studentWorld, int x, int y, int health, int imageID);
         void doSomething();
         void bribe();
 private:
-        enum State { moving, waiting, leaving, dead };
+        enum State { moving, waiting, leaving };
         int m_numSquaresToMoveInCurrentDirection;
         int m_numSquaresMovedInCurrentDirection;
         int m_numTicksToWait;
         int m_numTicksWaited;
-        int m_health;
         State m_state;
 };
 
+class RegularProtester : public Protester {
+public:
+        RegularProtester(StudentWorld *studentWorld, int x, int y);
+};
 
-// // maybe should remove this and hardcore can inherit from regular
-// class RegularProtester : public Protester {
-// public:
-//         RegularProtester(StudentWorld *studentWorld, int x, int y) : Protester(studentWorld, x, y, IID_PROTESTER) {}
-// };
-//
-// class HardcoreProtester : public Protester {
-// public:
-//         HardcoreProtester(StudentWorld *studentWorld, int x, int y) : Protester(studentWorld, x, y, IID_HARD_CORE_PROTESTER) {}
-// };
-//
-// opening theme sound is in gamecontroller's doSomething
-
+class HardcoreProtester : public Protester {
+public:
+        HardcoreProtester(StudentWorld *studentWorld, int x, int y);
+};
 
 #endif // ACTOR_H_

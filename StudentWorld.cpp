@@ -5,11 +5,14 @@
 #include "freeglut_std.h"
 #include <array>
 #include <cstdio>
+#include <future>
 #include <string>
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <utility>
+#include <vector>
+#include <queue>
+#include <unordered_map>
 
 GameWorld* createStudentWorld(std::string assetDir) {
 	return new StudentWorld(assetDir);
@@ -22,13 +25,179 @@ StudentWorld::StudentWorld(std::string assetDir) : GameWorld(assetDir) {
 int StudentWorld::getNumItemsInLevel(int itemID) {
         switch (itemID) {
         case IID_BOULDER:
+                // return 20;
                 return std::min(2 + static_cast<int>(getLevel() / 2), 9);
         case IID_GOLD:
                 return std::max(5 - static_cast<int>(getLevel() / 2), 2);
         case IID_BARREL:
+                // return 1;
                 return std::min(2 + static_cast<int>(getLevel()), 9);
         default:
                 return 0;
+        }
+}
+
+// random algorithm failed when there were too many elements already in place
+// need to make sure this does the right thing for boulders water pools (spawn in places with no ice) etc.
+
+
+StudentWorld::coordinate StudentWorld::getCoordinatesFor(int itemID) {
+        if (itemID == IID_SONAR) {
+                return coordinate{0, 60};
+        }
+
+        std::vector<coordinate> candidateCoordinates;
+
+        for (int y = 0; y < VIEW_HEIGHT - (SPRITE_WIDTH * 2); y++) {
+                for (int x = 0; x < VIEW_WIDTH - SPRITE_WIDTH; x++) {
+                        if (itemID == IID_BOULDER && (x <= 30 - SPRITE_WIDTH || x > 33) && y >= 4) {
+                                candidateCoordinates.push_back(coordinate{x, y});
+                        }
+                        else if ((itemID == IID_GOLD || itemID == IID_BARREL) && (x <= 30 - SPRITE_WIDTH || x > 33 || y == 0)) {
+                                candidateCoordinates.push_back(coordinate{x, y});
+                        }
+                        else if (itemID == IID_WATER_POOL) {
+                                bool shouldAdd = true;
+
+                                for (int iy = y; iy < y + 4; iy++) {
+                                        for (int ix = x; ix < x + 4; ix++) {
+                                                if (m_ice[iy][ix] != nullptr) {
+                                                        shouldAdd = false;
+                                                }
+                                        }
+                                }
+
+                                if (shouldAdd) {
+                                        candidateCoordinates.push_back(coordinate{x, y});
+                                }
+                        }
+                }
+        }
+
+        candidateCoordinates.erase(std::remove_if(candidateCoordinates.begin(), candidateCoordinates.end(), [this](const coordinate& c) {
+                for (Actor* actor : getActors()) {
+                        if (distance(c.x, c.y, actor->getX(), actor->getY()) <= 6) {
+                                return true;
+                        }
+                }
+
+                return false;
+
+        }), candidateCoordinates.end());
+
+        if (candidateCoordinates.size() == 0) {
+                return coordinate{-1, -1};
+        }
+
+        int index = rand() % candidateCoordinates.size();
+
+        return candidateCoordinates[index];
+}
+
+bool StudentWorld::isFreePosition(int x, int y) {
+        if (x > VIEW_WIDTH - SPRITE_WIDTH || y > VIEW_WIDTH - SPRITE_WIDTH) {
+                return false;
+        }
+
+        for (int iy = y; iy < y + SPRITE_WIDTH; iy++) {
+                for (int ix = x; ix < x + SPRITE_WIDTH; ix++) {
+                        if (m_ice[iy][ix] != nullptr) {
+                                return false;
+                        }
+                }
+        }
+
+        return true;
+}
+
+std::vector<StudentWorld::coordinate> StudentWorld::getFreeNeighbors(int x, int y) {
+        std::vector<coordinate> freeNeighbors;
+
+        if (isFreePosition(x - 1, y)) {
+                freeNeighbors.push_back(coordinate{x - 1, y});
+        }
+
+        if (isFreePosition(x + 1, y)) {
+                freeNeighbors.push_back(coordinate{x + 1, y});
+        }
+
+        if (isFreePosition(x, y - 1)) {
+                freeNeighbors.push_back(coordinate{x, y - 1});
+        }
+
+        if (isFreePosition(x, y + 1)) {
+                freeNeighbors.push_back(coordinate{x, y + 1});
+        }
+
+        return freeNeighbors;
+}
+
+
+void StudentWorld::calculateShortestPathsToExit() {
+        std::queue<coordinate> queue;
+
+        coordinate start = coordinate{VIEW_WIDTH - SPRITE_WIDTH, VIEW_HEIGHT - SPRITE_WIDTH};
+
+        for (int iy = 0; iy < VIEW_HEIGHT; iy++) {
+                for (int ix = 0; ix < VIEW_HEIGHT; ix++) {
+                        m_shortestPathsToExit[iy][ix] = std::vector<coordinate>();
+                        m_directionsToExit[iy][ix] = Actor::Direction::none;
+                }
+        }
+
+        m_shortestPathsToExit[start.y][start.x].push_back(start);
+        queue.push(start);
+
+        while (!queue.empty()) {
+                coordinate current = queue.front();
+                queue.pop();
+
+                for (coordinate neighbor : getFreeNeighbors(current.x, current.y)) {
+                        if (m_shortestPathsToExit[neighbor.y][neighbor.x].empty()) {
+                                if (current.y > neighbor.y) { // current is above neighbor so neighbor needs to go up etc
+                                        m_directionsToExit[neighbor.y][neighbor.x] = Actor::Direction::up;
+                                }
+                                else if (current.y < neighbor.y) {
+                                        m_directionsToExit[neighbor.y][neighbor.x] = Actor::Direction::down;
+                                }
+                                else if (current.x < neighbor.x) {
+                                        m_directionsToExit[neighbor.y][neighbor.x] = Actor::Direction::left;
+                                }
+                                else if (current.x > neighbor.x) {
+                                        m_directionsToExit[neighbor.y][neighbor.x] = Actor::Direction::right;
+                                }
+                                else {
+                                        m_directionsToExit[neighbor.y][neighbor.x] = Actor::Direction::none;
+                                }
+
+                                m_shortestPathsToExit[neighbor.y][neighbor.x] = m_shortestPathsToExit[current.y][current.x];
+                                m_shortestPathsToExit[neighbor.y][neighbor.x].push_back(neighbor);
+                                queue.push(neighbor);
+                        }
+                }
+        }
+
+}
+
+StudentWorld::coordinate StudentWorld::getNextLocationOnEscapeRoute(int x, int y) {
+        if (m_shortestPathsToExit[y][x].empty()) {
+                return coordinate{x, y};
+        }
+        return m_shortestPathsToExit[y][x][m_shortestPathsToExit[y][x].size() - 2];
+};
+
+Actor::Direction StudentWorld::getDirectionToExit(int x, int y) {
+        return m_directionsToExit[y][x];
+}
+
+void StudentWorld::revealGameElementsWithinRadiusOfIceman(int radius) {
+        int x = m_iceman->getX();
+        int y = m_iceman->getY();
+
+        for (Actor* object : getActors()) {
+                if (distance(x, y, object->getX(), object->getY()) <= radius && object->isAlive()) {
+                        object->setVisible(true);
+                }
         }
 }
 
@@ -47,72 +216,32 @@ int StudentWorld::init() {
         m_iceman = new Iceman(this);
 
         for (int i = 0; i < getNumItemsInLevel(IID_BOULDER); i++) {
-                int x;
-                int y;
-
-                bool foundCoords = false;
-
-                while (!foundCoords) {
-                        x = (std::rand() % (VIEW_WIDTH - SPRITE_WIDTH)) + 1;
-                        y = (std::rand() % (VIEW_HEIGHT - (SPRITE_WIDTH * 2))) + 1;
-
-                        foundCoords = true;
-
-                        for (Actor* object : getActors()) {
-                                if (distance(x, y, object->getX(), object->getY()) <= 6) {
-                                        foundCoords = false;
-                                        break;
-                                }
-                        }
-                }
-
-                m_gameObjects.push_back(new Boulder(this, x, y));
-                removeIceAt(x, y);
+                coordinate c = getCoordinatesFor(IID_BOULDER);
+                addActor(new Boulder(this, c.x, c.y));
+                removeIceAt(c.x, c.y);
         }
 
         for (int i = 0; i < getNumItemsInLevel(IID_BARREL); i++) {
-                int x;
-                int y;
-
-                bool foundCoords = false;
-
-                while (!foundCoords) {
-                        x = (std::rand() % (VIEW_WIDTH - SPRITE_WIDTH)) + 1;
-                        y = (std::rand() % (VIEW_HEIGHT - (SPRITE_WIDTH * 2))) + 1;
-
-                        foundCoords = true;
-
-                        for (Actor* object : getActors()) {
-                                if (distance(x, y, object->getX(), object->getY()) <= 6) {
-                                        foundCoords = false;
-                                        break;
-                                }
-                        }
-                }
-
-                m_gameObjects.push_back(new Barrel(this, x, y));
+                coordinate c = getCoordinatesFor(IID_BARREL);
+                addActor(new Barrel(this, c.x, c.y));
         }
 
-        addActor(new Protester(this, 60, 60, IID_PROTESTER));
-        addActor(new Gold(this, 20, 0, false, -1, true, false));
+        for (int i = 0; i < getNumItemsInLevel(IID_GOLD); i++) {
+                coordinate c = getCoordinatesFor(IID_GOLD);
+                addActor(new Gold(this, c.x, c.y, false, -1, true, false));
+        }
+
+        addActor(new RegularProtester(this, 50, 60));
+        addActor(new HardcoreProtester(this, 60, 60));
 
         return GWSTATUS_CONTINUE_GAME;
 }
 
-bool StudentWorld::isDistributedObjectPositionOk(int x, int y) const {
-        for (Actor* object : getActors()) {
-                if (std::sqrt(std::pow(x - object->getX(), 2) - std::pow(y - object->getY(), 2)) <= 6) {
-                        return false;
-                }
-        }
-
-        return true;
-}
-
 int StudentWorld::move() {
+        calculateShortestPathsToExit();
         // format this nicely later
         std::string statusBar = "Lvl:  " + std::to_string(getLevel()) + "  " +
-                                "Lives: " + std::to_string(m_iceman->getLives()) + "  " + 
+                                "Lives: " + std::to_string(getLives()) + "  " + 
                                 "Hlth: " + std::to_string((m_iceman->getHealth() / 10) * 100) + "%  " +
                                 "Wtr:  " + std::to_string(m_iceman->getItemCount(IID_WATER_POOL)) + "  " +
                                 "Gld:  " + std::to_string(m_iceman->getItemCount(IID_GOLD)) + "  " +
@@ -124,15 +253,27 @@ int StudentWorld::move() {
 
         m_iceman->doSomething();
 
-        for (std::vector<Actor*>::iterator it = m_gameObjects.begin(); it != m_gameObjects.end();) {
+        for (std::vector<Actor*>::iterator it = m_actors.begin(); it != m_actors.end();) {
                 (*it)->doSomething();
 
                 if (!(*it)->isAlive()) {
                         delete *it;
-                        it = m_gameObjects.erase(it);
+                        it = m_actors.erase(it);
                 }
                 else {
                         it++;
+                }
+        }
+
+        if ((static_cast<double>(rand()) / RAND_MAX) < (1.0 / (getLevel() * 25 + 300))) {
+                if ((static_cast<double>(rand()) / RAND_MAX) < (1.0 / 5.0)) {
+                        coordinate c = getCoordinatesFor(IID_SONAR);
+                        addActor(new Sonar(this, c.x, c.y, -1));
+                }
+                else {
+                        coordinate c = getCoordinatesFor(IID_WATER_POOL);
+                        int timeLeft = std::max(100, static_cast<int>(300 - (10 * getLevel())));
+                        addActor(new Water(this, c.x, c.y, timeLeft));
                 }
         }
 
@@ -140,7 +281,8 @@ int StudentWorld::move() {
                 decLives();
                 return GWSTATUS_PLAYER_DIED;
         }
-        else if (getNumItemsInLevel(IID_BARREL) - m_iceman->getItemCount(IID_BARREL) == 0) {
+        else if (getNumItemsInLevel(IID_BARREL) - m_iceman->getItemCount(IID_BARREL) <= 0) {
+                playSound(SOUND_FINISHED_LEVEL);
                 return GWSTATUS_FINISHED_LEVEL;
         }
 
@@ -164,7 +306,7 @@ bool StudentWorld::removeIceAt(int x, int y) {
 }
 
 void StudentWorld::addActor(Actor* gameObject) {
-        m_gameObjects.push_back(gameObject);
+        m_actors.push_back(gameObject);
 }
 
 bool StudentWorld::isDirObstructed(int x, int y, Actor::Direction dir) const {
@@ -223,7 +365,7 @@ bool StudentWorld::isDirObstructed(int x, int y, Actor::Direction dir) const {
 }
 
 std::vector<Actor*> StudentWorld::getActors() const {
-        return static_cast<const std::vector<Actor*>>(m_gameObjects);
+        return m_actors;
 };
 
 Iceman* StudentWorld::getIceman() const {  // this is bad because someone else can delete the iceman
@@ -236,11 +378,11 @@ double StudentWorld::distance(int x1, int y1, int x2, int y2) {
 }
 
 void StudentWorld::cleanUp() {
-        for (Actor* gameObject : m_gameObjects) {
-                delete gameObject;
+        for (Actor* actor : getActors()) {
+                delete actor;
         }
 
-        m_gameObjects.clear();
+        m_actors.clear();
 
         for (int y = 0; y < VIEW_HEIGHT; y++) {
                 for (int x = 0; x < VIEW_WIDTH; x++) {

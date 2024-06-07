@@ -206,6 +206,7 @@ void GameController::specialKeyboardEvent(int key, int /* x */, int /* y */)
 
 void GameController::playSound(int soundID)
 {
+        // return; // eli added this to stop the dang sounds
 	if (soundID == SOUND_NONE)
 		return;
 
@@ -226,7 +227,7 @@ void GameController::doSomething()
 		case not_applicable:
 			break;
 		case welcome:
-			// playSound(SOUND_THEME);
+			playSound(SOUND_THEME);
 			m_mainMessage = "Welcome to IceMan!";
 			m_secondMessage = "Press Enter to begin play...";
 			setGameState(prompt);
